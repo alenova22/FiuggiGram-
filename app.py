@@ -9,7 +9,7 @@ SECRET_JOIN_CODE = os.environ.get("FIUGGI_CODE", "FIUGGI2025")
 PING_INTERVAL_SEC = 30
 # ------------------------------------
 
-from flask import Flask, request, redirect, url_for, send_from_directory
+from flask import Flask, request, redirect, url_for, send_from_directory, jsonify
 
 # ✅ Usa PostgreSQL se DATABASE_URL è impostata
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -79,30 +79,73 @@ def get_db_connection():
     else:
         return sqlite3.connect("/tmp/fiuggigram.db")
 
+def fmt_ts(ts):
+    try:
+        dt = datetime.datetime.fromisoformat(str(ts))
+        now = datetime.datetime.now()
+        diff = now - dt
+        if diff.days == 0:
+            if diff.seconds < 60:
+                return "pochi secondi fa"
+            elif diff.seconds < 3600:
+                m = diff.seconds // 60
+                return f"{m} minuto{'i' if m != 1 else ''} fa"
+            else:
+                h = diff.seconds // 3600
+                return f"{h} ora{'e' if h != 1 else ''} fa"
+        elif diff.days == 1:
+            return "ieri"
+        else:
+            return dt.strftime("%d %b")
+    except:
+        return str(ts)
+
+@app.route("/api/posts")
+def api_posts():
+    conn = get_db_connection()
+    if DB_TYPE == "postgres":
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+    else:
+        cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
+               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+        FROM posts p
+        ORDER BY p.timestamp DESC
+    """)
+    posts = cursor.fetchall()
+    conn.close()
+
+    # Rendi i dati serializzabili in JSON
+    posts_json = []
+    for row in posts:
+        if DB_TYPE == "postgres":
+            posts_json.append({
+                "id": row['id'],
+                "username": row['username'],
+                "content": row['content'],
+                "image_path": row['image_path'],
+                "parent_id": row['parent_id'],
+                "timestamp": str(row['timestamp']),
+                "like_count": row['like_count']
+            })
+        else:
+            posts_json.append({
+                "id": row[0],
+                "username": row[1],
+                "content": row[2],
+                "image_path": row[3],
+                "parent_id": row[4],
+                "timestamp": str(row[5]),
+                "like_count": row[6]
+            })
+
+    return jsonify(posts_json)
+
 def render_page(posts, replies_by_post, error=""):
     theme = request.cookies.get("theme", "auto")
     theme_attr = f'data-theme="{theme}"' if theme in ("light", "dark") else ''
-
-    def fmt_ts(ts):
-        try:
-            dt = datetime.datetime.fromisoformat(str(ts))
-            now = datetime.datetime.now()
-            diff = now - dt
-            if diff.days == 0:
-                if diff.seconds < 60:
-                    return "pochi secondi fa"
-                elif diff.seconds < 3600:
-                    m = diff.seconds // 60
-                    return f"{m} minuto{'i' if m != 1 else ''} fa"
-                else:
-                    h = diff.seconds // 3600
-                    return f"{h} ora{'e' if h != 1 else ''} fa"
-            elif diff.days == 1:
-                return "ieri"
-            else:
-                return dt.strftime("%d %b")
-        except:
-            return str(ts)
 
     def render_post(pid, username, content, image_path, ts, like_count, is_liked, replies, level=0):
         indent = "  " * level
@@ -130,7 +173,7 @@ def render_page(posts, replies_by_post, error=""):
             )
 
         return f'''
-        {indent}<div class="fiuggi-post" style="margin-left:{margin_left}px; border-left:{border_left}; padding-left:{pad_left}px">
+        {indent}<div class="fiuggi-post" id="post-{pid}" style="margin-left:{margin_left}px; border-left:{border_left}; padding-left:{pad_left}px">
           <div class="fiuggi-header">
             <div class="fiuggi-avatar">{username[0].upper()}</div>
             <div class="fiuggi-meta">
@@ -471,6 +514,7 @@ def render_page(posts, replies_by_post, error=""):
 
     <h2 style="font-family:'ClashGrotesk'; font-weight:500; font-size:1.5rem; color:var(--text); margin:32px 0 20px">📬 I vostri momenti</h2>
     
+    <div id="posts-container">
     {html_posts if html_posts else '''
     <div class="fiuggi-card" style="text-align:center; padding:50px 20px">
       <div style="font-size:4rem; margin-bottom:20px">✨</div>
@@ -478,6 +522,7 @@ def render_page(posts, replies_by_post, error=""):
       <p style="opacity:0.8">Sii il primo a condividere qualcosa di bello.</p>
     </div>
     '''}
+    </div>
 
     <footer>
       © {datetime.datetime.now().year} FiuggiGram — creato da Alessio
@@ -487,6 +532,35 @@ def render_page(posts, replies_by_post, error=""):
   <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
   <script>
     setInterval(() => fetch('/ping').catch(() => {{}}), {PING_INTERVAL_SEC * 1000});
+
+    // ✅ Aggiornamenti in tempo reale
+    let lastPostCount = 0;
+    let lastLikeCounts = {{}};
+
+    function updatePosts() {{
+        fetch('/api/posts')
+            .then(response => response.json())
+            .then(posts => {{
+                if (posts.length !== lastPostCount) {{
+                    window.location.reload(); // Ricarica solo se cambia il numero di post
+                }} else {{
+                    // Aggiorna solo i like
+                    posts.forEach(post => {{
+                        const btn = document.querySelector(`button[data-id="${{post.id}}"]`);
+                        if (btn) {{
+                            const span = btn.querySelector('span');
+                            if (span && lastLikeCounts[post.id] !== post.like_count) {{
+                                span.textContent = post.like_count;
+                                lastLikeCounts[post.id] = post.like_count;
+                            }}
+                        }}
+                    }});
+                }}
+            }})
+            .catch(err => console.error("Errore caricamento post:", err));
+    }}
+
+    setInterval(updatePosts, 5000); // Ogni 5 secondi
 
     function toggleTheme() {{
       const body = document.body;
@@ -741,10 +815,6 @@ def like_post(post_id):
 
     conn.close()
     return {"success": True, "liked": liked, "count": count}
-
-@app.route("/ping")
-def ping():
-    return "", 200
 
 if not os.path.exists("/tmp/fiuggigram.db"):
     init_db()
