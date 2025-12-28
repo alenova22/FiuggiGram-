@@ -6,16 +6,15 @@ import json
 from io import BytesIO
 
 # ---------- CONFIGURAZIONE ----------
-DATABASE = "/tmp/fiuggigram.db"  # ✅ Render-friendly (file temporaneo)
-UPLOAD_FOLDER = "/tmp/uploads"   # ✅ Render-friendly (file temporaneo)
+DATABASE = "/tmp/fiuggigram.db"
+UPLOAD_FOLDER = "/tmp/uploads"
 MAX_FILE_SIZE = 2 * 1024 * 1024
-SECRET_JOIN_CODE = os.environ.get("FIUGGI_CODE", "FIUGGI2025")  # ✅ Lettura da ambiente
+SECRET_JOIN_CODE = os.environ.get("FIUGGI_CODE", "FIUGGI2025")
 PING_INTERVAL_SEC = 30
 # ------------------------------------
 
 from flask import Flask, request, redirect, url_for, send_from_directory
 
-# ✅ Disabilita upload su Render (file system read-only)
 PIL_AVAILABLE = False
 
 app = Flask(__name__)
@@ -84,9 +83,6 @@ def render_page(posts, replies_by_post, error=""):
         pad_left = 16 - margin_left if level > 0 else 16
 
         img_html = ""
-        # ✅ Immagini disabilitate su Render (non persistenti)
-        # if image_path and os.path.exists(os.path.join(UPLOAD_FOLDER, image_path)):
-        #     img_html = f'<div class="fiuggi-image" style="margin-top:12px"><img src="/uploads/{image_path}" alt="Condivisione"></div>'
 
         reply_input = f'''
         <div class="reply-form mt-2" id="reply-form-{pid}" style="display:none">
@@ -99,7 +95,6 @@ def render_page(posts, replies_by_post, error=""):
 
         replies_html = ""
         for r in replies:
-            # ✅ FIX: estrai esplicitamente i campi e calcola is_liked per la risposta
             rid, runame, rcontent, rimg, rparent, rts, rlike_count = r
             is_reply_liked = request.cookies.get(f"liked_{rid}") == "1"
             replies_html += render_post(
@@ -128,7 +123,6 @@ def render_page(posts, replies_by_post, error=""):
         </div>
         '''
 
-    # Separa post principali e risposte
     main_posts = [p for p in posts if p[4] is None]
     html_posts = ""
     for pid, username, content, image_path, parent_id, ts, like_count in main_posts:
@@ -230,23 +224,27 @@ def render_page(posts, replies_by_post, error=""):
       border: 1px solid var(--border);
     }}
 
-      /* Form */
-      .form-group {{ margin-bottom: 18px; }}
-      .form-control {{
+    /* Form */
+    .form-group {{ margin-bottom: 18px; }}
+    .form-control {{
       width: 100%;
       padding: 14px 18px;
       border-radius: 16px;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,0.6);
+      background: rgba(255,255,255,0.7); /* ✅ Sfondo chiaro */
       font-family: 'Geist Mono';
       font-size: 1.02rem;
       transition: all 0.3s;
-      color: var(--text); /* ✅ Testo nero in chiaro, bianco in scuro */
-      }}
-      .form-control:focus {{
+      color: #1E293B; /* ✅ Testo nero chiaro */
+    }}
+    body[data-theme="dark"] .form-control {{
+      background: rgba(30, 41, 59, 0.7); /* ✅ Sfondo scuro */
+      color: #E2E8F0; /* ✅ Testo chiaro */
+    }}
+    .form-control:focus {{
       outline: none;
       border-color: var(--yellow-fiuggi);
-      box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.2);
+      box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.3);
     }}
     .file-input-wrapper {{
       background: rgba(255,255,255,0.4);
@@ -362,16 +360,17 @@ def render_page(posts, replies_by_post, error=""):
     }}
 
     /* Reply form */
-    .reply-form {{
-      display: flex;
-      gap: 8px;
-      margin-top: 16px;
-    }}
     .reply-input {{
       flex: 1;
       padding: 10px 14px;
       border-radius: 14px;
       font-size: 0.95rem;
+      background: rgba(255,255,255,0.7);
+      color: #1E293B;
+    }}
+    body[data-theme="dark"] .reply-input {{
+      background: rgba(30, 41, 59, 0.7);
+      color: #E2E8F0;
     }}
     .btn-reply {{
       width: 40px;
@@ -549,7 +548,7 @@ def home():
         username = request.form.get("username", "").strip()[:16] or "Amico"
         content = request.form.get("content", "").strip()[:400]
         code = request.form.get("code", "")
-        image_path = None  # ✅ Disabilitato su Render
+        image_path = None
 
         if code != SECRET_JOIN_CODE:
             cursor.execute("""
@@ -574,10 +573,6 @@ def home():
             
             conn.close()
             return render_page(posts, replies_by_post, error=True)
-
-        # ✅ Upload disabilitato su Render
-        # if PIL_AVAILABLE and "image" in request.files:
-        #     ...
 
         cursor.execute(
             "INSERT INTO posts (username, content, image_path, parent_id) VALUES (?, ?, ?, NULL)",
@@ -649,11 +644,6 @@ def like_post(post_id):
     count = cursor.fetchone()[0]
     conn.close()
     return {"success": True, "liked": liked, "count": count}
-
-# ✅ Disabilitato su Render (non persistente)
-# @app.route("/uploads/<filename>")
-# def uploaded_file(filename):
-#     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 if not os.path.exists(DATABASE):
     init_db()
