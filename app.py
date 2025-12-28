@@ -533,7 +533,7 @@ def render_page(posts, replies_by_post, error=""):
   <script>
     setInterval(() => fetch('/ping').catch(() => {{}}), {PING_INTERVAL_SEC * 1000});
 
-    // ✅ Aggiornamenti in tempo reale senza ricarica
+    // ✅ Aggiornamenti in tempo reale senza duplicati
     let knownPosts = new Set();
     let lastLikeCounts = {{}};
 
@@ -588,14 +588,8 @@ def render_page(posts, replies_by_post, error=""):
                     }}
                 }}
 
-                // Rimuovi post cancellati (se necessario)
-                for (const id of knownPosts) {{
-                    if (!existingPostIds.has(id)) {{
-                        const el = document.getElementById('post-' + id);
-                        if (el) el.remove();
-                        knownPosts.delete(id);
-                    }}
-                }}
+                // Aggiorna knownPosts per includere tutti gli ID attuali
+                knownPosts = new Set(existingPostIds);
             }})
             .catch(err => console.error("Errore caricamento post:", err));
     }}
