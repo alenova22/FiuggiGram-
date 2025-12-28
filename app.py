@@ -585,47 +585,8 @@ def home():
         image_path = None
 
         if code != SECRET_JOIN_CODE:
-            if DB_TYPE == "postgres":
-                cursor.execute("""
-                    SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
-                           (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-                    FROM posts p
-                    WHERE p.parent_id IS NULL
-                    ORDER BY p.timestamp DESC
-                """)
-            else:
-                cursor.execute("""
-                    SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
-                           (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-                    FROM posts p
-                    WHERE p.parent_id IS NULL
-                    ORDER BY p.timestamp DESC
-                """)
-            posts = cursor.fetchall()
-            
-            replies_by_post = {}
-            for row in posts:
-                pid = row['id'] if DB_TYPE == "postgres" else row[0]
-                if DB_TYPE == "postgres":
-                    cursor.execute("""
-                        SELECT id, username, content, image_path, parent_id, timestamp,
-                               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-                        FROM posts p
-                        WHERE p.parent_id = %s
-                        ORDER BY timestamp ASC
-                    """, (pid,))
-                else:
-                    cursor.execute("""
-                        SELECT id, username, content, image_path, parent_id, timestamp,
-                               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-                        FROM posts p
-                        WHERE p.parent_id = ?
-                        ORDER BY timestamp ASC
-                    """, (pid,))
-                replies_by_post[pid] = cursor.fetchall()
-            
             conn.close()
-            return render_page(posts, replies_by_post, error=True)
+            return render_page([], {}, error=True)
 
         if DB_TYPE == "postgres":
             cursor.execute(
@@ -638,7 +599,12 @@ def home():
                 (username, content, image_path)
             )
         conn.commit()
+        conn.close()
 
+        # ✅ REDIRECT DOPO IL POST → evita duplicati su refresh
+        return redirect(url_for("home"))
+
+    # Solo GET: carica i post
     if DB_TYPE == "postgres":
         cursor.execute("""
             SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
@@ -656,7 +622,7 @@ def home():
             ORDER BY p.timestamp DESC
         """)
     posts = cursor.fetchall()
-    
+
     replies_by_post = {}
     for row in posts:
         pid = row['id'] if DB_TYPE == "postgres" else row[0]
@@ -677,9 +643,9 @@ def home():
                 ORDER BY timestamp ASC
             """, (pid,))
         replies_by_post[pid] = cursor.fetchall()
-    
+
     conn.close()
-    return render_page(posts, replies_by_post)
+    return render_page(posts, replies_by_post, error=False)
 
 @app.route("/reply", methods=["POST"])
 def reply():
