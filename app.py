@@ -100,49 +100,6 @@ def fmt_ts(ts):
     except:
         return str(ts)
 
-@app.route("/api/posts")
-def api_posts():
-    conn = get_db_connection()
-    if DB_TYPE == "postgres":
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-    else:
-        cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
-               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-        FROM posts p
-        ORDER BY p.timestamp DESC
-    """)
-    posts = cursor.fetchall()
-    conn.close()
-
-    # Rendi i dati serializzabili in JSON
-    posts_json = []
-    for row in posts:
-        if DB_TYPE == "postgres":
-            posts_json.append({
-                "id": row['id'],
-                "username": row['username'],
-                "content": row['content'],
-                "image_path": row['image_path'],
-                "parent_id": row['parent_id'],
-                "timestamp": str(row['timestamp']),
-                "like_count": row['like_count']
-            })
-        else:
-            posts_json.append({
-                "id": row[0],
-                "username": row[1],
-                "content": row[2],
-                "image_path": row[3],
-                "parent_id": row[4],
-                "timestamp": str(row[5]),
-                "like_count": row[6]
-            })
-
-    return jsonify(posts_json)
-
 def render_page(posts, replies_by_post, error=""):
     theme = request.cookies.get("theme", "auto")
     theme_attr = f'data-theme="{theme}"' if theme in ("light", "dark") else ''
@@ -531,70 +488,8 @@ def render_page(posts, replies_by_post, error=""):
 
   <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
   <script>
+    // Ping per mantenere il server acceso
     setInterval(() => fetch('/ping').catch(() => {{}}), {PING_INTERVAL_SEC * 1000});
-
-    // ✅ Aggiornamenti in tempo reale senza duplicati
-    let knownPosts = new Set();
-    let lastLikeCounts = {{}};
-
-    function updatePosts() {{
-        fetch('/api/posts')
-            .then(response => response.json())
-            .then(posts => {{
-                const container = document.getElementById('posts-container');
-                const existingPostIds = new Set();
-
-                for (const post of posts) {{
-                    existingPostIds.add(post.id);
-
-                    if (!knownPosts.has(post.id)) {{
-                        // Nuovo post: aggiungi in cima
-                        const postEl = document.createElement('div');
-                        postEl.id = 'post-' + post.id;
-                        postEl.className = 'fiuggi-post';
-                        postEl.innerHTML = `
-                            <div class="fiuggi-header">
-                                <div class="fiuggi-avatar">${{post.username[0].toUpperCase()}}</div>
-                                <div class="fiuggi-meta">
-                                    <strong>${{post.username}}</strong>
-                                    <span class="fiuggi-time">pochi secondi fa</span>
-                                </div>
-                                <div class="fiuggi-actions">
-                                    <button class="fiuggi-like" data-id="${{post.id}}" onclick="toggleLike(${{post.id}})" style="color:#64748B">
-                                        <i class="far fa-heart"></i> <span>${{post.like_count}}</span>
-                                    </button>
-                                    <button class="fiuggi-reply" onclick="toggleReply(${{post.id}})">🗨️ Rispondi</button>
-                                </div>
-                            </div>
-                            <div class="fiuggi-content">${{post.content}}</div>
-                            <div class="reply-form mt-2" id="reply-form-${{post.id}}" style="display:none">
-                                <input type="text" class="form-control form-control-sm reply-input" placeholder="La tua risposta…" maxlength="200" onkeypress="if(event.key==='Enter') submitReply(${{post.id}})">
-                                <button class="btn-reply" onclick="submitReply(${{post.id}})">➤</button>
-                            </div>
-                            <div class="replies" id="replies-${{post.id}}"></div>
-                        `;
-                        container.insertBefore(postEl, container.firstChild);
-                        knownPosts.add(post.id);
-                    }} else {{
-                        // Aggiorna solo like
-                        const btn = document.querySelector(`button[data-id="${{post.id}}"]`);
-                        if (btn) {{
-                            const span = btn.querySelector('span');
-                            if (span && lastLikeCounts[post.id] !== post.like_count) {{
-                                span.textContent = post.like_count;
-                                lastLikeCounts[post.id] = post.like_count;
-                            }}
-                        }}
-                    }}
-                }}
-
-                // Aggiorna knownPosts per includere tutti gli ID attuali
-                knownPosts = new Set(existingPostIds);
-            }})
-            .catch(err => console.error("Errore caricamento post:", err));
-    }}
-
-    setInterval(updatePosts, 5000); // Ogni 5 secondi
 
     function toggleTheme() {{
       const body = document.body;
@@ -849,6 +744,10 @@ def like_post(post_id):
 
     conn.close()
     return {"success": True, "liked": liked, "count": count}
+
+@app.route("/ping")
+def ping():
+    return "", 200
 
 if not os.path.exists("/tmp/fiuggigram.db"):
     init_db()
