@@ -230,9 +230,9 @@ def render_page(posts, replies_by_post, error=""):
       border: 1px solid var(--border);
     }}
 
-    /* Form */
-    .form-group {{ margin-bottom: 18px; }}
-    .form-control {{
+      /* Form */
+      .form-group {{ margin-bottom: 18px; }}
+      .form-control {{
       width: 100%;
       padding: 14px 18px;
       border-radius: 16px;
@@ -241,8 +241,9 @@ def render_page(posts, replies_by_post, error=""):
       font-family: 'Geist Mono';
       font-size: 1.02rem;
       transition: all 0.3s;
-    }}
-    .form-control:focus {{
+      color: var(--text); /* ✅ Testo nero in chiaro, bianco in scuro */
+      }}
+      .form-control:focus {{
       outline: none;
       border-color: var(--yellow-fiuggi);
       box-shadow: 0 0 0 3px rgba(255, 209, 102, 0.2);
