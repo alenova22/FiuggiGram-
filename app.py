@@ -447,7 +447,7 @@ def render_page(posts, replies_by_post, error=""):
   
   <div class="container">
     <h1 class="logo">FiuggiGram</h1>
-    <p class="logo-sub">✨ Uno spazio per condividere, insieme</p>
+    <p class="logo-sub">✨ Un piccolo social di Fiuggi</p>
 
     <div class="fiuggi-card">
       <form method="POST" enctype="multipart/form-data">
@@ -462,7 +462,7 @@ def render_page(posts, replies_by_post, error=""):
           <input type="file" id="fileInput" name="image" accept="image/*" style="display:none">
         </div>
         <div class="form-group">
-          <input type="password" name="code" class="form-control" placeholder="Codice Fiuggi" required>
+          <input type="password" name="code" class="form-control" placeholder="Codice" required>
         </div>
         <button type="submit" class="btn-fiuggi">✨ Pubblica</button>
         {"<div class='error'><i class='fas fa-exclamation-triangle'></i> Codice errato!</div>" if error else ""}
@@ -480,7 +480,7 @@ def render_page(posts, replies_by_post, error=""):
     '''}
 
     <footer>
-      © {datetime.datetime.now().year} FiuggiGram — creato con cura
+      © {datetime.datetime.now().year} FiuggiGram — creato da Alessio
     </footer>
   </div>
 
