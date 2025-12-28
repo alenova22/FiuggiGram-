@@ -688,9 +688,6 @@ if not os.path.exists(DATABASE):
     init_db()
 
 if __name__ == "__main__":
-    print("✨ FiuggiGram Evolution — STABLE EDITION AVVIATA!")
-    print(f"   🎨 Design premium | 🗨️ Risposte | ❤️ Like | 🌓 Tema auto")
-    print(f"   🌐 Apri: http://localhost:5000")
-    print(f"   🔑 Codice Fiuggi: {SECRET_JOIN_CODE}")
-    print("   ✅ Pronto per il deploy online!")
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"✨ FiuggiGram Evolution — in ascolto su porta {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)  # ✅ debug=False per produzione
