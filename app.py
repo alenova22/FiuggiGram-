@@ -6,20 +6,17 @@ import json
 from io import BytesIO
 
 # ---------- CONFIGURAZIONE ----------
-DATABASE = "fiuggigram.db"
-UPLOAD_FOLDER = "uploads"
+DATABASE = "/tmp/fiuggigram.db"  # ✅ Render-friendly (file temporaneo)
+UPLOAD_FOLDER = "/tmp/uploads"   # ✅ Render-friendly (file temporaneo)
 MAX_FILE_SIZE = 2 * 1024 * 1024
-SECRET_JOIN_CODE = "FIUGGI2025"
+SECRET_JOIN_CODE = os.environ.get("FIUGGI_CODE", "FIUGGI2025")  # ✅ Lettura da ambiente
 PING_INTERVAL_SEC = 30
 # ------------------------------------
 
 from flask import Flask, request, redirect, url_for, send_from_directory
 
-try:
-    from PIL import Image
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
+# ✅ Disabilita upload su Render (file system read-only)
+PIL_AVAILABLE = False
 
 app = Flask(__name__)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -46,24 +43,6 @@ def init_db():
     """)
     conn.commit()
     conn.close()
-
-def compress_image(img_data, max_size_kb=500):
-    if not PIL_AVAILABLE:
-        return img_data[:max_size_kb * 1024]
-    try:
-        img = Image.open(BytesIO(img_data))
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        quality = 90
-        while True:
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=quality, optimize=True)
-            size_kb = buf.tell() / 1024
-            if size_kb <= max_size_kb or quality <= 20:
-                return buf.getvalue()
-            quality -= 5
-    except:
-        return img_data[:max_size_kb * 1024]
 
 def get_client_id():
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
@@ -105,8 +84,9 @@ def render_page(posts, replies_by_post, error=""):
         pad_left = 16 - margin_left if level > 0 else 16
 
         img_html = ""
-        if image_path and os.path.exists(os.path.join(UPLOAD_FOLDER, image_path)):
-            img_html = f'<div class="fiuggi-image" style="margin-top:12px"><img src="/uploads/{image_path}" alt="Condivisione"></div>'
+        # ✅ Immagini disabilitate su Render (non persistenti)
+        # if image_path and os.path.exists(os.path.join(UPLOAD_FOLDER, image_path)):
+        #     img_html = f'<div class="fiuggi-image" style="margin-top:12px"><img src="/uploads/{image_path}" alt="Condivisione"></div>'
 
         reply_input = f'''
         <div class="reply-form mt-2" id="reply-form-{pid}" style="display:none">
@@ -568,7 +548,7 @@ def home():
         username = request.form.get("username", "").strip()[:16] or "Amico"
         content = request.form.get("content", "").strip()[:400]
         code = request.form.get("code", "")
-        image_path = None
+        image_path = None  # ✅ Disabilitato su Render
 
         if code != SECRET_JOIN_CODE:
             cursor.execute("""
@@ -594,20 +574,9 @@ def home():
             conn.close()
             return render_page(posts, replies_by_post, error=True)
 
-        if PIL_AVAILABLE and "image" in request.files:
-            file = request.files["image"]
-            if file and file.filename != "":
-                try:
-                    img_data = file.read()
-                    if len(img_data) > MAX_FILE_SIZE:
-                        img_data = compress_image(img_data)
-                    filename = f"img_{int(datetime.datetime.now().timestamp())}_{os.urandom(2).hex()}.jpg"
-                    path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-                    with open(path, "wb") as f:
-                        f.write(img_data)
-                    image_path = filename
-                except:
-                    pass
+        # ✅ Upload disabilitato su Render
+        # if PIL_AVAILABLE and "image" in request.files:
+        #     ...
 
         cursor.execute(
             "INSERT INTO posts (username, content, image_path, parent_id) VALUES (?, ?, ?, NULL)",
@@ -680,22 +649,15 @@ def like_post(post_id):
     conn.close()
     return {"success": True, "liked": liked, "count": count}
 
-@app.route("/uploads/<filename>")
-def uploaded_file(filename):
-    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+# ✅ Disabilitato su Render (non persistente)
+# @app.route("/uploads/<filename>")
+# def uploaded_file(filename):
+#     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 if not os.path.exists(DATABASE):
     init_db()
 
-from flask import Flask
-import os
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "FiuggiGram Evolution è online! 🎉"
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    print(f"✨ FiuggiGram Evolution — Avvio su porta {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
