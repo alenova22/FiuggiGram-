@@ -533,19 +533,50 @@ def render_page(posts, replies_by_post, error=""):
   <script>
     setInterval(() => fetch('/ping').catch(() => {{}}), {PING_INTERVAL_SEC * 1000});
 
-    // ✅ Aggiornamenti in tempo reale
-    let lastPostCount = 0;
+    // ✅ Aggiornamenti in tempo reale senza ricarica
+    let knownPosts = new Set();
     let lastLikeCounts = {{}};
 
     function updatePosts() {{
         fetch('/api/posts')
             .then(response => response.json())
             .then(posts => {{
-                if (posts.length !== lastPostCount) {{
-                    window.location.reload(); // Ricarica solo se cambia il numero di post
-                }} else {{
-                    // Aggiorna solo i like
-                    posts.forEach(post => {{
+                const container = document.getElementById('posts-container');
+                const existingPostIds = new Set();
+
+                for (const post of posts) {{
+                    existingPostIds.add(post.id);
+
+                    if (!knownPosts.has(post.id)) {{
+                        // Nuovo post: aggiungi in cima
+                        const postEl = document.createElement('div');
+                        postEl.id = 'post-' + post.id;
+                        postEl.className = 'fiuggi-post';
+                        postEl.innerHTML = `
+                            <div class="fiuggi-header">
+                                <div class="fiuggi-avatar">${{post.username[0].toUpperCase()}}</div>
+                                <div class="fiuggi-meta">
+                                    <strong>${{post.username}}</strong>
+                                    <span class="fiuggi-time">pochi secondi fa</span>
+                                </div>
+                                <div class="fiuggi-actions">
+                                    <button class="fiuggi-like" data-id="${{post.id}}" onclick="toggleLike(${{post.id}})" style="color:#64748B">
+                                        <i class="far fa-heart"></i> <span>${{post.like_count}}</span>
+                                    </button>
+                                    <button class="fiuggi-reply" onclick="toggleReply(${{post.id}})">🗨️ Rispondi</button>
+                                </div>
+                            </div>
+                            <div class="fiuggi-content">${{post.content}}</div>
+                            <div class="reply-form mt-2" id="reply-form-${{post.id}}" style="display:none">
+                                <input type="text" class="form-control form-control-sm reply-input" placeholder="La tua risposta…" maxlength="200" onkeypress="if(event.key==='Enter') submitReply(${{post.id}})">
+                                <button class="btn-reply" onclick="submitReply(${{post.id}})">➤</button>
+                            </div>
+                            <div class="replies" id="replies-${{post.id}}"></div>
+                        `;
+                        container.insertBefore(postEl, container.firstChild);
+                        knownPosts.add(post.id);
+                    }} else {{
+                        // Aggiorna solo like
                         const btn = document.querySelector(`button[data-id="${{post.id}}"]`);
                         if (btn) {{
                             const span = btn.querySelector('span');
@@ -554,7 +585,16 @@ def render_page(posts, replies_by_post, error=""):
                                 lastLikeCounts[post.id] = post.like_count;
                             }}
                         }}
-                    }});
+                    }}
+                }}
+
+                // Rimuovi post cancellati (se necessario)
+                for (const id of knownPosts) {{
+                    if (!existingPostIds.has(id)) {{
+                        const el = document.getElementById('post-' + id);
+                        if (el) el.remove();
+                        knownPosts.delete(id);
+                    }}
                 }}
             }})
             .catch(err => console.error("Errore caricamento post:", err));
