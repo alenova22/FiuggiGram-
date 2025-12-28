@@ -1,55 +1,83 @@
 import os
-import sqlite3
 import datetime
 import base64
 import json
 from io import BytesIO
 
 # ---------- CONFIGURAZIONE ----------
-DATABASE = "/tmp/fiuggigram.db"
-UPLOAD_FOLDER = "/tmp/uploads"
-MAX_FILE_SIZE = 2 * 1024 * 1024
 SECRET_JOIN_CODE = os.environ.get("FIUGGI_CODE", "FIUGGI2025")
 PING_INTERVAL_SEC = 30
 # ------------------------------------
 
 from flask import Flask, request, redirect, url_for, send_from_directory
 
-PIL_AVAILABLE = False
+# ✅ Usa PostgreSQL se DATABASE_URL è impostata
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    DB_TYPE = "postgres"
+else:
+    import sqlite3
+    DB_TYPE = "sqlite"
 
 app = Flask(__name__)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def init_db():
-    conn = sqlite3.connect(DATABASE)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL,
-            content TEXT,
-            image_path TEXT,
-            parent_id INTEGER DEFAULT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS likes (
-            post_id INTEGER,
-            ip_hash TEXT,
-            PRIMARY KEY (post_id, ip_hash)
-        )
-    """)
-    conn.commit()
-    conn.close()
+    if DB_TYPE == "postgres":
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS posts (
+                id SERIAL PRIMARY KEY,
+                username TEXT NOT NULL,
+                content TEXT,
+                image_path TEXT,
+                parent_id INTEGER DEFAULT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS likes (
+                post_id INTEGER,
+                ip_hash TEXT,
+                PRIMARY KEY (post_id, ip_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
+    else:
+        conn = sqlite3.connect("/tmp/fiuggigram.db")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                content TEXT,
+                image_path TEXT,
+                parent_id INTEGER DEFAULT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS likes (
+                post_id INTEGER,
+                ip_hash TEXT,
+                PRIMARY KEY (post_id, ip_hash)
+            )
+        """)
+        conn.commit()
+        conn.close()
 
 def get_client_id():
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     return base64.b64encode(ip.encode()).decode()[:12]
 
-@app.route("/ping")
-def ping():
-    return "", 200
+def get_db_connection():
+    if DB_TYPE == "postgres":
+        return psycopg2.connect(DATABASE_URL)
+    else:
+        return sqlite3.connect("/tmp/fiuggigram.db")
 
 def render_page(posts, replies_by_post, error=""):
     theme = request.cookies.get("theme", "auto")
@@ -57,7 +85,7 @@ def render_page(posts, replies_by_post, error=""):
 
     def fmt_ts(ts):
         try:
-            dt = datetime.datetime.fromisoformat(ts)
+            dt = datetime.datetime.fromisoformat(str(ts))
             now = datetime.datetime.now()
             diff = now - dt
             if diff.days == 0:
@@ -74,7 +102,7 @@ def render_page(posts, replies_by_post, error=""):
             else:
                 return dt.strftime("%d %b")
         except:
-            return ts
+            return str(ts)
 
     def render_post(pid, username, content, image_path, ts, like_count, is_liked, replies, level=0):
         indent = "  " * level
@@ -231,15 +259,15 @@ def render_page(posts, replies_by_post, error=""):
       padding: 14px 18px;
       border-radius: 16px;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,0.7); /* ✅ Sfondo chiaro */
+      background: rgba(255,255,255,0.7);
       font-family: 'Geist Mono';
       font-size: 1.02rem;
       transition: all 0.3s;
-      color: #1E293B; /* ✅ Testo nero chiaro */
+      color: #1E293B;
     }}
     body[data-theme="dark"] .form-control {{
-      background: rgba(30, 41, 59, 0.7); /* ✅ Sfondo scuro */
-      color: #E2E8F0; /* ✅ Testo chiaro */
+      background: rgba(30, 41, 59, 0.7);
+      color: #E2E8F0;
     }}
     .form-control:focus {{
       outline: none;
@@ -541,8 +569,11 @@ def render_page(posts, replies_by_post, error=""):
 
 @app.route("/", methods=["GET", "POST"])
 def home():
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    conn = get_db_connection()
+    if DB_TYPE == "postgres":
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+    else:
+        cursor = conn.cursor()
 
     if request.method == "POST":
         username = request.form.get("username", "").strip()[:16] or "Amico"
@@ -551,53 +582,97 @@ def home():
         image_path = None
 
         if code != SECRET_JOIN_CODE:
-            cursor.execute("""
-                SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
-                       (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-                FROM posts p
-                WHERE p.parent_id IS NULL
-                ORDER BY p.timestamp DESC
-            """)
+            if DB_TYPE == "postgres":
+                cursor.execute("""
+                    SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
+                           (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+                    FROM posts p
+                    WHERE p.parent_id IS NULL
+                    ORDER BY p.timestamp DESC
+                """)
+            else:
+                cursor.execute("""
+                    SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
+                           (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+                    FROM posts p
+                    WHERE p.parent_id IS NULL
+                    ORDER BY p.timestamp DESC
+                """)
             posts = cursor.fetchall()
             
             replies_by_post = {}
-            for pid, *rest in posts:
-                cursor.execute("""
-                    SELECT id, username, content, image_path, parent_id, timestamp,
-                           (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-                    FROM posts p
-                    WHERE p.parent_id = ?
-                    ORDER BY timestamp ASC
-                """, (pid,))
+            for row in posts:
+                pid = row['id'] if DB_TYPE == "postgres" else row[0]
+                if DB_TYPE == "postgres":
+                    cursor.execute("""
+                        SELECT id, username, content, image_path, parent_id, timestamp,
+                               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+                        FROM posts p
+                        WHERE p.parent_id = %s
+                        ORDER BY timestamp ASC
+                    """, (pid,))
+                else:
+                    cursor.execute("""
+                        SELECT id, username, content, image_path, parent_id, timestamp,
+                               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+                        FROM posts p
+                        WHERE p.parent_id = ?
+                        ORDER BY timestamp ASC
+                    """, (pid,))
                 replies_by_post[pid] = cursor.fetchall()
             
             conn.close()
             return render_page(posts, replies_by_post, error=True)
 
-        cursor.execute(
-            "INSERT INTO posts (username, content, image_path, parent_id) VALUES (?, ?, ?, NULL)",
-            (username, content, image_path)
-        )
+        if DB_TYPE == "postgres":
+            cursor.execute(
+                "INSERT INTO posts (username, content, image_path, parent_id) VALUES (%s, %s, %s, NULL)",
+                (username, content, image_path)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO posts (username, content, image_path, parent_id) VALUES (?, ?, ?, NULL)",
+                (username, content, image_path)
+            )
         conn.commit()
 
-    cursor.execute("""
-        SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
-               (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-        FROM posts p
-        WHERE p.parent_id IS NULL
-        ORDER BY p.timestamp DESC
-    """)
+    if DB_TYPE == "postgres":
+        cursor.execute("""
+            SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
+                   (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+            FROM posts p
+            WHERE p.parent_id IS NULL
+            ORDER BY p.timestamp DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT p.id, p.username, p.content, p.image_path, p.parent_id, p.timestamp,
+                   (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+            FROM posts p
+            WHERE p.parent_id IS NULL
+            ORDER BY p.timestamp DESC
+        """)
     posts = cursor.fetchall()
     
     replies_by_post = {}
-    for pid, *rest in posts:
-        cursor.execute("""
-            SELECT id, username, content, image_path, parent_id, timestamp,
-                   (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
-            FROM posts p
-            WHERE p.parent_id = ?
-            ORDER BY timestamp ASC
-        """, (pid,))
+    for row in posts:
+        pid = row['id'] if DB_TYPE == "postgres" else row[0]
+        if DB_TYPE == "postgres":
+            cursor.execute("""
+                SELECT id, username, content, image_path, parent_id, timestamp,
+                       (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+                FROM posts p
+                WHERE p.parent_id = %s
+                ORDER BY timestamp ASC
+            """, (pid,))
+        else:
+            cursor.execute("""
+                SELECT id, username, content, image_path, parent_id, timestamp,
+                       (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) as like_count
+                FROM posts p
+                WHERE p.parent_id = ?
+                ORDER BY timestamp ASC
+            """, (pid,))
         replies_by_post[pid] = cursor.fetchall()
     
     conn.close()
@@ -613,39 +688,65 @@ def reply():
     if not post_id or not content:
         return {"success": False}, 400
 
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO posts (username, content, image_path, parent_id) VALUES (?, ?, NULL, ?)",
-        (username, content, post_id)
-    )
+    conn = get_db_connection()
+    if DB_TYPE == "postgres":
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO posts (username, content, image_path, parent_id) VALUES (%s, %s, NULL, %s)",
+            (username, content, post_id)
+        )
+    else:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO posts (username, content, image_path, parent_id) VALUES (?, ?, NULL, ?)",
+            (username, content, post_id)
+        )
     conn.commit()
     conn.close()
     return {"success": True}
 
 @app.route("/like/<int:post_id>", methods=["POST"])
 def like_post(post_id):
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
+    conn = get_db_connection()
+    if DB_TYPE == "postgres":
+        cursor = conn.cursor()
+    else:
+        cursor = conn.cursor()
     client_id = get_client_id()
 
-    cursor.execute("SELECT 1 FROM likes WHERE post_id = ? AND ip_hash = ?", (post_id, client_id))
-    exists = cursor.fetchone()
-
-    if exists:
-        cursor.execute("DELETE FROM likes WHERE post_id = ? AND ip_hash = ?", (post_id, client_id))
-        liked = False
+    if DB_TYPE == "postgres":
+        cursor.execute("SELECT 1 FROM likes WHERE post_id = %s AND ip_hash = %s", (post_id, client_id))
+        exists = cursor.fetchone()
+        if exists:
+            cursor.execute("DELETE FROM likes WHERE post_id = %s AND ip_hash = %s", (post_id, client_id))
+            liked = False
+        else:
+            cursor.execute("INSERT INTO likes (post_id, ip_hash) VALUES (%s, %s)", (post_id, client_id))
+            liked = True
+        conn.commit()
+        cursor.execute("SELECT COUNT(*) FROM likes WHERE post_id = %s", (post_id,))
+        count = cursor.fetchone()[0]
     else:
-        cursor.execute("INSERT INTO likes (post_id, ip_hash) VALUES (?, ?)", (post_id, client_id))
-        liked = True
+        cursor.execute("SELECT 1 FROM likes WHERE post_id = ? AND ip_hash = ?", (post_id, client_id))
+        exists = cursor.fetchone()
+        if exists:
+            cursor.execute("DELETE FROM likes WHERE post_id = ? AND ip_hash = ?", (post_id, client_id))
+            liked = False
+        else:
+            cursor.execute("INSERT INTO likes (post_id, ip_hash) VALUES (?, ?)", (post_id, client_id))
+            liked = True
+        conn.commit()
+        cursor.execute("SELECT COUNT(*) FROM likes WHERE post_id = ?", (post_id,))
+        count = cursor.fetchone()[0]
 
-    conn.commit()
-    cursor.execute("SELECT COUNT(*) FROM likes WHERE post_id = ?", (post_id,))
-    count = cursor.fetchone()[0]
     conn.close()
     return {"success": True, "liked": liked, "count": count}
 
-if not os.path.exists(DATABASE):
+@app.route("/ping")
+def ping():
+    return "", 200
+
+if not os.path.exists("/tmp/fiuggigram.db"):
     init_db()
 
 if __name__ == "__main__":
